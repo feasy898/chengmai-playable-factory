@@ -122,7 +122,11 @@ export function normalizeSpec(raw: any): NormalizedSpec {
     endScreen: {
       showScore: bool(endScreen.showScore, true),
       ctaKey: str(endScreen.ctaKey, "cta"),
-      landingUrl: str(endScreen.landingUrl, "https://example.com/playable-lp"),
+      // 缺省空串而非 URL 字面量：字面量会随 bundle 打进产物 JS，spec 换自定义
+      // landingUrl 时即触发打包器零外链红线（白名单只含 spec landingUrl + 规则库
+      // 惰性串）。schema 必填 landingUrl，走校验的流水线恒有值；此兜底仅服务
+      // 未过校验的直跑（CTA 打开空串由 routeExit 静默兜底，无副作用）。
+      landingUrl: str(endScreen.landingUrl, ""),
     },
     locales: Array.isArray(i18n.locales) && i18n.locales.length ? i18n.locales.map(String) : ["en"],
     defaultLocale: str(i18n.defaultLocale, "en"),
