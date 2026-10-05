@@ -137,9 +137,20 @@ async function main() {
       // 独立实现交叉验证：系统 bsdtar（P5 去 venv 化；断言语义保持——条目名/入口引用/CRC）。
       // 按绝对路径定位：本机 PATH 首位可能是 GNU tar（不支持 zip），只有 libarchive 系
       // bsdtar 可读 zip；解包（-xf）由 libarchive 校验 CRC，损坏即非零退出（execFileSync 抛错）。
-      const TAR = process.platform === "win32"
-        ? path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe")
-        : "tar";
+      // Linux：优先用 PATH 中的 bsdtar（libarchive 系独立读取器，Debian/Ubuntu 为 libarchive-tools
+      // 包）；不可用时回落 "tar" 并保持原断言（须为 bsdtar/libarchive，否则显式失败）。PF_TAR_BIN 可覆盖。
+      const defaultTar = () => {
+        if (process.platform === "win32") {
+          return path.join(process.env.SystemRoot || "C:\\Windows", "System32", "tar.exe");
+        }
+        try {
+          execFileSync("bsdtar", ["--version"], { encoding: "utf8", stdio: "ignore" });
+          return "bsdtar";
+        } catch {
+          return "tar";
+        }
+      };
+      const TAR = process.env.PF_TAR_BIN || defaultTar();
       {
         let ok = false;
         const details = [];

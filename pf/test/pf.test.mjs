@@ -125,19 +125,11 @@ test("pf static-server 子进程：文件 200 / 目录 index 200 / 穿越与缺�
 
 test("pf 网络探测单元：addrTier 段优先级表逐值 + pidIsOurServer 拒绝非正整数", async () => {
   const { addrTier, pidIsOurServer } = await import("../src/util.ts");
-<<<<<<< 554ac7ed2406efd47a78d6f7a202f4b3a70d9b07
   assert.equal(addrTier("192.168.1.10"), 0);
   assert.equal(addrTier("10.0.0.1"), 1);
   assert.equal(addrTier("172.16.0.1"), 2);
   assert.equal(addrTier("172.32.0.1"), 8);
   assert.equal(addrTier("100.64.0.5"), 3);
-=======
-  assert.equal(addrTier("198.51.100.22"), 0);
-  assert.equal(addrTier("10.0.0.1"), 1);
-  assert.equal(addrTier("172.16.0.1"), 2);
-  assert.equal(addrTier("172.32.0.1"), 8);
-  assert.equal(addrTier("100.100.0.5"), 3);
->>>>>>> 3cade55e823244ad570318d6e37f5153051529ac
   assert.equal(addrTier("100.128.0.1"), 8);
   assert.equal(addrTier("198.18.0.1"), 9);
   assert.equal(addrTier("198.19.255.255"), 9);
