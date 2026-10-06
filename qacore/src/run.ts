@@ -18,10 +18,12 @@ import { driveAutoplay, hasPf, mediaSample, pfMuted, probeInstalled, PROBE_JS,
          qcAssets, qcTextStates, qcTexts, rtcCount, audioRunning,
          audioEverBeforeGesture } from "./autoplay.ts";
 import { evaluate } from "./checks.ts";
+import { exitStubScript } from "./exit.ts";
 import { ev } from "./ev.ts";
 import { grayscaleVariance } from "./pngvar.ts";
 import { ArtifactServer } from "./server.ts";
-import { loadChannelLimit, loadChannelMuteRequired, loadChannelRuntimeScripts } from "./rules.ts";
+import { loadChannelExit, loadChannelLimit, loadChannelMaxFiles,
+         loadChannelMuteRequired, loadChannelRuntimeScripts } from "./rules.ts";
 
 export interface RunOptions {
   artifact: string;
@@ -33,6 +35,8 @@ export interface RunOptions {
   autoplayTimeout: number;
   requireTexts: string[];
   requireSprites: string[];
+  /** CHK06 传 URL 渠道的期望外呼参数（make 传 spec 的 endScreen.landingUrl）。 */
+  requireExitUrl?: string | null;
 }
 
 export const VIEWPORT_PORTRAIT = { width: 390, height: 844 } as const;
@@ -108,6 +112,8 @@ export async function cmdRun(args: RunOptions): Promise<number> {
   const blockedUrls = new Set<string>();
   const runtimeScripts = loadChannelRuntimeScripts(args.channel);
   const runtimeStubs: string[] = [];
+  // CHK06 退出接口取证：按规则库 exit.protocol 注入渠道退出桩（导航前，双趟各一次）。
+  const exitChannel = loadChannelExit(args.channel);
   let rtcMax = 0;
   let loadMs = -1.0;
   let pfPresent = false;
@@ -218,6 +224,11 @@ export async function cmdRun(args: RunOptions): Promise<number> {
       page.on("pageerror", (exc) => consoleErrors.push(`pageerror: ${exc}`));
       // 探针注入每页面一次（重复注入会二次包装 AudioContext 导致计数失真）。
       await page.addInitScript(new Function(PROBE_JS) as () => void);
+      // 渠道退出桩同纪律（每页面一次，重复注入会二次包装 window.open）：在页面
+      // 脚本执行前定义记账器与渠道退出全局替身（投放时由渠道容器提供，本地质检
+      // 时容器不在场——桩模拟环境、不模拟被测物）。
+      await page.addInitScript(
+        new Function(exitStubScript(exitChannel ? exitChannel.protocol : null)) as () => void);
       await page.route("**/*", onRoute);
       await page.routeWebSocket("**/*", onWs);
     };
@@ -334,11 +345,48 @@ export async function cmdRun(args: RunOptions): Promise<number> {
     await server.stop();
   }
 
+  // CHK02 文件数取证（2026-10-06 实装）：被测交付物 = 入口 HTML + 伺服根内真实被
+  // 页面取走的本地伴生文件（状态 200 的非桩本地请求，按路径去重）。渠道容器运行
+  // 时桩（mraid.js 等，stub 记账）投放时由容器提供、非包体内容，不计；浏览器自便
+  // 利请求（favicon.ico）非包体内容，不计。当前输入契约是单 HTML（cli exit 2 口径
+  // 不收 zip），zip 渠道的包内条目数由打包器 maxFiles 强制（packager build.mjs），
+  // 本检查复核"自称单文件交付的产物确实单文件"——伴生文件即超限证据。
+  const entryPathname = `/${basename(artifact)}`;
+  const localExtras = new Set<string>();
+  for (const e of requests) {
+    if (e.stub || e.status !== 200) continue;
+    let u: URL;
+    try {
+      u = new URL(e.url);
+    } catch {
+      continue;
+    }
+    const isLocal = (u.hostname === "127.0.0.1" || u.hostname === "localhost")
+      && u.port === String(server.port);
+    if (!isLocal) continue;
+    if (u.pathname === entryPathname || u.pathname === "/favicon.ico") continue;
+    localExtras.add(u.pathname);
+  }
+  const fileCount = 1 + localExtras.size;
+
   const facts: Record<string, unknown> = {
     artifact_bytes: statSync(artifact).size,
     channel: args.channel,
     channel_max_bytes: loadChannelLimit(args.channel),
+    channel_max_files: loadChannelMaxFiles(args.channel),
+    file_count: fileCount,
+    file_count_extras: [...localExtras].sort(),
     channel_mute_required: loadChannelMuteRequired(args.channel),
+    // CHK06 判定输入：注入的退出协议（规则库无该渠道 → null → skip）、结束页 CTA
+    // 钩子在位/真实点击数、退出接口记账、期望外呼参数（--require-exit-url）。
+    exit_protocol: exitChannel ? exitChannel.protocol : null,
+    exit_call: exitChannel ? exitChannel.call : null,
+    exit_cta_hook: Boolean((autoplayFacts as Record<string, unknown>).exitCtaHook),
+    exit_cta_gestures: Number((autoplayFacts as Record<string, unknown>).exitCtaGestures ?? 0),
+    exit_calls: autoplayEnabled
+      ? ((autoplayFacts as Record<string, unknown>).exitCalls ?? [])
+      : [],
+    require_exit_url: args.requireExitUrl ?? null,
     external_requests: external,
     runtime_stubs: runtimeStubs,
     rtc_connections: rtcMax,

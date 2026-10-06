@@ -14,8 +14,8 @@
 // - landingUrl：仅接受 http/https（schema pattern 同规）；服务端从不访问该 URL。
 //
 // 本模块不做任何网络请求（防 SSRF 纪律，与 oracle 同款）。
-// 模板入表口径与 oracle 原状一致：match3/merge/pullpin 三模板；sort 未入表
-// （oracle README 预留栏原文"待 specgen 注册后开放"，factory 如实登记同缺口）。
+// 模板入表：match3/merge/pullpin/sort 四模板全入表（sort 于 2026-10-06 注册开放——
+// 构建器在 make 层早已可用；oracle 原状仅三模板，见根 README 预留栏的历史登记）。
 
 import { randomInt } from "node:crypto";
 
@@ -26,20 +26,20 @@ import {
   pullpinSimulate,
 } from "../packages/spec/src/invariants.ts";
 
-// 与 pf/src/util.ts TEMPLATE_BUILDERS 对齐：只有接了真实构建器的模板才可入表
-//（sort 的构建器在 make 层可用，webui 表单未入表——oracle 原状，登记于 README 预留栏）。
-export const TEMPLATES = ["match3", "merge", "pullpin"] as const;
+// 与 pf/src/util.ts TEMPLATE_BUILDERS 对齐：只有接了真实构建器的模板才可入表。
+export const TEMPLATES = ["match3", "merge", "pullpin", "sort"] as const;
 
 export const TEMPLATE_LABELS: Record<string, string> = {
-  match3: "三消", merge: "合成", pullpin: "拔针救援",
+  match3: "三消", merge: "合成", pullpin: "拔针救援", sort: "排序分类",
 };
 export const TEMPLATE_TITLES: Record<string, string> = {
   match3: "宝石三消（试玩）",
   merge: "合成大冒险（试玩）",
   pullpin: "拔针救援（试玩）",
+  sort: "排序分类（试玩）",
 };
 export const TEMPLATE_GESTURE: Record<string, "tap" | "drag"> = {
-  match3: "drag", merge: "drag", pullpin: "tap",
+  match3: "drag", merge: "drag", pullpin: "tap", sort: "tap",
 };
 
 /** 各模板可上传替换的精灵槽位键（与模板源码的替换键约定一致）。 */
@@ -47,6 +47,7 @@ export const SPRITE_SLOTS: Record<string, string[]> = {
   match3: ["piece-0", "piece-1", "piece-2", "piece-3", "piece-4", "jelly"],
   merge: ["tier-1", "tier-2", "tier-3", "tier-4", "tier-5"],
   pullpin: ["pin", "rescuee", "hazard"],
+  sort: ["rod", "piece"],
 };
 
 export const LOCALES = ["zh", "en", "ja", "ko", "pt-BR", "de", "ar"] as const;
@@ -84,6 +85,9 @@ const TUTORIALS: Record<string, Record<string, string>> = {
   },
   pullpin: {
     zh: "点击拔出别针，救出小伙伴！", en: "Tap to pull the pin and rescue!",
+  },
+  sort: {
+    zh: "点选一根柱子，再点目标柱倒过去！", en: "Tap a stack, then tap where it pours!",
   },
 };
 
@@ -248,10 +252,14 @@ export function assembleSpec(template: string, opts: AssembleSpecOptions = {}): 
       }
       : template === "merge"
         ? { cols: 5, rows: 5, maxTier: 5, spawnTierMax: 2, goalTier: 4, spriteKeys: SPRITE_SLOTS["merge"] }
-        : {
-          levels: 3, pinsPerLevel: 3, hazard: "lava", rescuee: "character",
-          orderSolution: pullpinOrder(finalSeed, 3, 3),
-        };
+        : template === "sort"
+          // sort 参数固定走 golden-sort 同款冻结默认（5 柱 × 4 层 / 4 色 / 常规模式 /
+          // 步数上限 30）——界面只做最小表单，参数级微调走 spec 上传或 pf CLI。
+          ? { rods: 5, layersPerRod: 4, colors: 4, screwMode: false, moveLimit: 30 }
+          : {
+            levels: 3, pinsPerLevel: 3, hazard: "lava", rescuee: "character",
+            orderSolution: pullpinOrder(finalSeed, 3, 3),
+          };
 
   const spec: Record<string, unknown> = {
     specVersion: "1.0.0",

@@ -87,6 +87,22 @@ for (const t of TEMPLATES) {
     assert.ok(auto.gestures > 0, `${t.name}: 试玩手势数 > 0`);
     assert.equal(auto.reachedState, "end", `${t.name}: 最终 state=end`);
     assert.equal(auto.endScreenVisible, true, `${t.name}: 结束页可见`);
+    // CHK02/CHK06 实装后的 golden 真实判定（2026-10-06）：
+    // - CHK02：单 HTML 自包含产物 file_count=1 ≤ preview 上限 1；
+    // - CHK06：结束页 CTA 真实点击 → window.open（preview 协议）携带落地页 URL 记账。
+    const byId = new Map(report.checks.map((c) => [c.id, c]));
+    assert.equal(byId.get("CHK02").status, "pass",
+      `${t.name}: CHK02 应 pass：${byId.get("CHK02").detail}`);
+    assert.equal(report.facts.file_count, 1, `${t.name}: 单 HTML 交付 file_count=1`);
+    assert.equal(byId.get("CHK06").status, "pass",
+      `${t.name}: CHK06 应 pass：${byId.get("CHK06").detail}`);
+    assert.equal(report.facts.exit_protocol, "window-open", `${t.name}: preview 退出协议`);
+    assert.ok(report.facts.exit_cta_hook === true && report.facts.exit_cta_gestures >= 1,
+      `${t.name}: cta 钩子在位且 CTA 已点击`);
+    const openCalls = (report.facts.exit_calls ?? []).filter((c) => c.fn === "window.open");
+    assert.ok(openCalls.length >= 1
+      && /^https?:\/\/\S+$/.test(String(openCalls[0].url)),
+      `${t.name}: window.open 应带绝对落地页 URL 被调用`);
   });
 }
 

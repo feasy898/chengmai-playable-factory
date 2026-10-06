@@ -290,6 +290,9 @@ async function qaOne(cell, packed, builds, outRoot) {
     "--out", reportPath];
   for (const t of requiredTextsFor(spec, locale)) cmd.push("--require-text", t);
   for (const k of builds.get(`${cell.spec}\u0000${locale}`).sprites) cmd.push("--require-sprite", k);
+  // CHK06（2026-10-06 实装）：传 URL 退出协议的期望参数 = spec 落地页（与 pf make 同口径）。
+  const landingUrl = String(spec?.flow?.endScreen?.landingUrl ?? "").trim();
+  if (landingUrl) cmd.push("--require-exit-url", landingUrl);
 
   const t0 = performance.now();
   const proc = await runAsync(cmd);

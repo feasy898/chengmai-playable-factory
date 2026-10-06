@@ -15,6 +15,11 @@
 // 缺失/格式不支持的键打警告并继续（运行期回退程序化贴图）。真实嵌入清单同步
 // 写旁车 `<out>.assets.json`（make 据此给 qacore CHK10 传 --require-sprite）。
 //
+// assetkit（M5）接线（与 tmpl-match3 同一管线）：环境变量 PF_ASSET_OPTMAP 指向
+// assetkit 产物映射时，spec 声明的素材按声明串精确匹配优化产物——命中且文件在
+// 则内联优化后字节；未命中/产物缺失/格式不支持则回退原素材并告警，构建行为与
+// 无 optmap 完全一致。
+//
 // 引擎 vendor 件（决策 §2.1 M3 行 / templates README 契约）：构建前从
 // packages/templates/vendor/engine.js 母本**字节复制**到 src/vendor/engine.js
 //（sha256 锚定校验，漂移即失败——母本唯一，包内副本不入库见根 .gitignore）。
@@ -66,8 +71,24 @@ function resolveAssetPath(rel, specDir) {
   return null;
 }
 
+function loadAssetOptIndex() {
+  const optmapPath = process.env.PF_ASSET_OPTMAP;
+  if (!optmapPath || !existsSync(optmapPath)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(optmapPath, "utf8"));
+    const byKey = new Map();
+    for (const e of parsed.entries || []) {
+      if (e && typeof e.key === "string" && typeof e.out === "string") byKey.set(e.key, e);
+    }
+    return { byKey, outDir: parsed.outDir ? path.resolve(parsed.outDir) : path.dirname(path.resolve(optmapPath)) };
+  } catch (err) {
+    console.warn(`[tmpl-sort] 警告: PF_ASSET_OPTMAP 不可读，忽略（${err.message}）`);
+    return null;
+  }
+}
+
 /** 构建期内联素材：返回 (内联 data URI 表, 真实嵌入清单)。 */
-function buildAssetMap(spec, specDir) {
+function buildAssetMap(spec, specDir, optIndex) {
   const sprites = (spec.assets && spec.assets.sprites) || {};
   const map = {};
   const manifest = [];
@@ -77,6 +98,23 @@ function buildAssetMap(spec, specDir) {
     if (!abs) {
       console.warn(`[tmpl-sort] 警告: 素材文件缺失，跳过嵌入（运行期回退程序化贴图）: ${key}=${rel}`);
       continue;
+    }
+    if (optIndex) {
+      const opt = optIndex.byKey.get(rel);
+      const optAbs = opt ? path.resolve(optIndex.outDir, opt.out) : null;
+      if (optAbs && existsSync(optAbs)) {
+        const optMime = ASSET_MIME[path.extname(optAbs).toLowerCase()];
+        if (optMime) {
+          const bytes = readFileSync(optAbs);
+          map[key] = `data:${optMime};base64,${bytes.toString("base64")}`;
+          manifest.push({
+            spriteKey: key, path: rel, bytes: bytes.length,
+            source: "assetkit", originalBytes: opt.originalBytes, optimizedBytes: bytes.length,
+          });
+          continue;
+        }
+      }
+      console.warn(`[tmpl-sort] 警告: assetkit 优化产物缺失或格式不支持，回退原素材: ${key}=${rel}`);
     }
     const mime = ASSET_MIME[path.extname(abs).toLowerCase()];
     if (!mime) {
@@ -132,7 +170,7 @@ async function main() {
 
   const localeTag = o.locale || (spec.i18n && spec.i18n.defaultLocale) || "en";
   const title = (spec.meta && spec.meta.title) || "Playable";
-  const { map: assetMap, manifest } = buildAssetMap(spec, path.dirname(path.resolve(o.spec)));
+  const { map: assetMap, manifest } = buildAssetMap(spec, path.dirname(path.resolve(o.spec)), loadAssetOptIndex());
   const html = `<!doctype html>
 <html lang="${localeTag}">
 <head>

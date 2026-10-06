@@ -26,8 +26,8 @@ npm run typecheck:webui              # tsc strict
   校验算法只此一份权威实现（不复制）；组装后仍过 schema+不变式双校验。
 - 任务：内存 + `artifacts/webui/<id>/job.json` 落盘；make 子进程串行（promise 链信号量，
   防质检资源互踩）；超时 900s；done 时以本服务 LAN URL 重出二维码（qrcode 本地生成）。
-- 模板入表口径与 oracle 原状一致：match3/merge/pullpin 三模板；**sort 未入表**
-  （oracle README 预留栏原文"待 specgen 注册后开放"——factory 如实登记同缺口，见根 README 预留/未做）。
+- 模板入表：match3/merge/pullpin/sort 四模板（sort 于 2026-10-06 注册开放，参数走
+  golden-sort 同款冻结默认；oracle 原状仅三模板，历史登记见根 README 预留/未做收口记录）。
 
 ## eval（双交付之二；真实执行 exit 0）
 

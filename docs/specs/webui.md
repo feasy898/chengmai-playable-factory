@@ -39,8 +39,10 @@
   schema+不变式双校验（双保险）。
 - projectId 清洗为 `^[a-z0-9][a-z0-9-]{0,63}$`（洗空回退 `webui-<模板>`）；
   landingUrl 仅 http/https 且无空白（≤512）。
-- 模板入表口径与 oracle 原状一致：match3/merge/pullpin；**sort 未入表**（oracle README
-  预留栏原文"待 specgen 注册后开放"——登记于根 README 预留/未做）。
+- 模板入表：match3/merge/pullpin/sort 四模板全入表（sort 于 2026-10-06 注册开放——
+  label 排序分类、手势 tap、槽位 rod/piece、参数走 golden-sort 同款冻结默认
+  `rods:5/layersPerRod:4/colors:4/screwMode:false/moveLimit:30`；oracle 原状仅三模板，
+  历史登记见根 README 预留栏的收口记录）。
 
 ## 3. 宿主差异登记（语义冻结、宿主移植）
 

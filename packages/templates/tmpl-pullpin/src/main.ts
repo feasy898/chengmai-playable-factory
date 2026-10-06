@@ -18,6 +18,8 @@ declare global {
       hint: () => { x: number; y: number; type: string } | null;
       state: () => string;
       endScreenVisible?: () => boolean;
+      /** 结束页 CTA 热区中心（CHK06 取证：QC 点击它触发渠道退出接口）。 */
+      cta?: () => { x: number; y: number; type: string } | null;
       /** 已渲染到画布的文案集合（画布文字不进 DOM，innerText 取不到）。 */
       texts?: () => string[];
       /** 采样时刻逐条核验文案对象 active+visible（CHK10 上屏自证）。 */
@@ -43,6 +45,7 @@ let scene: any = null;
   hint: () => (scene ? scene.hint() : null),
   state: () => pf.phase(),
   endScreenVisible: () => (scene ? scene.endScreenVisible() : false),
+  cta: () => (scene && typeof scene.cta === "function" ? scene.cta() : null),
   texts: () => (scene && typeof scene.textsSeen === "function" ? scene.textsSeen() : []),
   textStates: () => (scene && typeof scene.textStates === "function" ? scene.textStates() : []),
   assets: () => (scene && typeof scene.assetAudit === "function" ? scene.assetAudit() : Promise.resolve([])),

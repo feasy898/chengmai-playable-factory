@@ -260,6 +260,8 @@ async function makeImpl(args: MakeArgs, startedEpoch: number, t0: number): Promi
 
   // CHK10 判定输入（反馈行动 3）：首语言的 标题/教程/胜/CTA/分 文案必须真实上屏；
   // 构建真实嵌入的用户替换素材（旁车清单）必须像素对账通过。lose 不要求。
+  // CHK06 判定输入（2026-10-06 实装）：传 URL 退出协议（mraid 形/preview）的期望
+  // 外呼参数 = spec 的 endScreen.landingUrl（判官断言退出接口参数精确一致）。
   const requiredTexts = requiredTextsFor(spec, locales[0]!);
   const previewHtml = previews.get(locales[0]!)!;
   const requiredSprites = requiredSpritesFor(previewHtml);
@@ -267,6 +269,10 @@ async function makeImpl(args: MakeArgs, startedEpoch: number, t0: number): Promi
   const chk10Args: string[] = [];
   for (const t of requiredTexts) chk10Args.push("--require-text", t);
   for (const k of requiredSprites) chk10Args.push("--require-sprite", k);
+  const landingUrl = String(
+    ((spec.flow as Record<string, unknown> | undefined)?.endScreen as
+      Record<string, unknown> | undefined)?.landingUrl ?? "").trim();
+  if (landingUrl) chk10Args.push("--require-exit-url", landingUrl);
 
   run([process.execPath, QACORE_CLI, "run", qaPkg.artifact,
     "--channel", qaPkg.channel, "--autoplay",

@@ -6,6 +6,7 @@
  *                            [--port 0] [--max-load-sec 2.0] [--autoplay]
  *                            [--autoplay-timeout 45.0]
  *                            [--require-text <str>]... [--require-sprite <key>]...
+ *                            [--require-exit-url <url>]
  *
  * 退出码（qacore spec §2，冻结）：0 = 无 fail（skip 不算）；1 = 有 fail；
  * 2 = 产物不存在或非 .html / 用法错误。
@@ -29,7 +30,8 @@ function usage() {
     "用法：node qacore/cli.mjs run <artifact.html> [--channel preview] [--out <report.json>]\n"
     + "                       [--port 0] [--max-load-sec 2.0] [--autoplay]\n"
     + "                       [--autoplay-timeout 45.0]\n"
-    + "                       [--require-text <str>]... [--require-sprite <key>]...\n");
+    + "                       [--require-text <str>]... [--require-sprite <key>]...\n"
+    + "                       [--require-exit-url <url>]\n");
 }
 
 async function main(argv) {
@@ -48,10 +50,11 @@ async function main(argv) {
     autoplayTimeout: 45.0,
     requireTexts: [],
     requireSprites: [],
+    requireExitUrl: null,
   };
   const VALUE_OPTS = new Set([
     "--channel", "--out", "--port", "--max-load-sec", "--autoplay-timeout",
-    "--require-text", "--require-sprite",
+    "--require-text", "--require-sprite", "--require-exit-url",
   ]);
   let positional = 0;
   for (let i = 1; i < argv.length; i++) {
@@ -73,6 +76,7 @@ async function main(argv) {
         case "--autoplay-timeout": opts.autoplayTimeout = Number.parseFloat(v); break;
         case "--require-text": opts.requireTexts.push(String(v)); break;
         case "--require-sprite": opts.requireSprites.push(String(v)); break;
+        case "--require-exit-url": opts.requireExitUrl = String(v); break;
       }
     } else if (a.startsWith("--")) {
       process.stderr.write(`qacore: 未知选项：${a}\n`);

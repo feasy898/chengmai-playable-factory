@@ -75,6 +75,8 @@ export class SortScene extends engine.Scene {
   private busy = false;
   private ended = false;
   private endScreenShown = false;
+  /** 结束页 CTA 热区中心（showEndScreen 时记录；QC CHK06 取证坐标）。 */
+  private ctaCenter: { x: number; y: number } | null = null;
   private movesLeft = 0;
   private completed = 0;
   private score = 0;
@@ -774,6 +776,7 @@ export class SortScene extends engine.Scene {
     const ctaW = panelW * 0.72;
     const ctaH = Math.max(56, panelH * 0.2);
     const ctaY = panelY + panelH * 0.26;
+    this.ctaCenter = { x: Math.round(w / 2), y: Math.round(ctaY) };
     const ctaG = this.add.graphics().setDepth(52);
     ctaG.fillStyle(0xff5a5f, 1);
     ctaG.fillRoundedRect(w / 2 - ctaW / 2, ctaY - ctaH / 2, ctaW, ctaH, ctaH / 2);
@@ -906,5 +909,14 @@ export class SortScene extends engine.Scene {
 
   endScreenVisible(): boolean {
     return this.endScreenShown && this.pf.phase() === "end";
+  }
+
+  /** 结束页 CTA 热区中心（qacore §5.1 cta 钩子语义）：QC CHK06 点击它触发
+   *  渠道退出接口取证；非结束页（或热区未建）为 null。 */
+  cta(): { x: number; y: number; type: "tap" } | null {
+    if (!(this.endScreenShown && this.pf.phase() === "end") || !this.ctaCenter) {
+      return null;
+    }
+    return { x: this.ctaCenter.x, y: this.ctaCenter.y, type: "tap" };
   }
 }

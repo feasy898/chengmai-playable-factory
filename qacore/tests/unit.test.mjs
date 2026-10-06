@@ -1,15 +1,17 @@
 /**
  * qacore 纯逻辑移植 eval（无浏览器层，root npm test 内真实执行）：
  * - checks.evaluate 判定向量：十项检查的 pass/fail/skip 语义（含 skip 不算过、
- *   CHK04 从严 fail、CHK10 自证从严、CHK01 规则库缺渠道 skip）；向量同时
+ *   CHK04 从严 fail、CHK10 自证从严、CHK01 规则库缺渠道 skip；CHK02/CHK06 为
+ *   factory 侧 2026-10-06 实装，本套件含其判定分支向量）；向量同时
  *   断言其余检查项"不受扰"（恰命中语义，MUT 设计原则）；
- * - MUT-01/02/04 构造算法：锚点注入 / 超体积 pad 精确到 maxBytes+4096；
+ * - MUT-01/02/04/05/06 构造算法：锚点注入 / 超体积 pad 精确到 maxBytes+4096 /
+ *   退出外呼剥除 / 本地伴生文件注入；
  * - pngvar 灰度方差：合成 PNG 的确定性向量 + 阈值 30 判定边界语义；
  * 向量期望值均按 oracle checks.py 语义推导并经本机真实运行复核（2026-09-30）。
  */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync } from "node:fs";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -207,9 +209,99 @@ test("CHK10：required 全缺 skip；未命中/钩子缺/从未可见/素材未�
     ["CHK01", "CHK03", "CHK08", "CHK09", "CHK10"]);
 });
 
-test("MUT 构造算法：锚点注入逐字节符合 §8 表；MUT-04 pad 精确到 maxBytes+4096", async () => {
-  const { MUTANTS, buildMutantSource, oversizeLimitBytes, readTextUniversal } =
-    await import("./mutations.mjs");
+test("CHK02：文件数 ≤ 上限 pass / 超限恰 fail（伴生清单入文案）/ 规则库无上限 skip", async () => {
+  const { evaluate } = await checksModule();
+  let out = evaluate({ ...BASE, channel_max_files: 1, file_count: 1, file_count_extras: [] });
+  assert.deepEqual(idsOf("pass", out), ["CHK01", "CHK02", "CHK03", "CHK08", "CHK09"]);
+  const chk02 = out.find((c) => c.id === "CHK02");
+  assert.ok(chk02.detail.includes("入口 HTML + 0 个本地伴生文件"), chk02.detail);
+
+  out = evaluate({ ...BASE, channel_max_files: 1, file_count: 2,
+    file_count_extras: ["/mut06-extra.js"] });
+  assert.deepEqual(idsOf("fail", out), ["CHK02"]);
+  const f02 = out.find((c) => c.id === "CHK02");
+  assert.ok(f02.detail.includes("2 个文件 > 上限 1")
+    && f02.detail.includes("/mut06-extra.js"), f02.detail);
+
+  out = evaluate({ ...BASE, channel_max_files: null, file_count: 5, file_count_extras: [] });
+  assert.equal(out.find((c) => c.id === "CHK02").status, "skip",
+    "规则库无上限 → skip（不假定）");
+});
+
+test("CHK06：结束页 CTA 点击 + 退出接口记账齐备 pass（传/不传 URL 两型）；缺钩子/未调用/参数不符 恰 fail；未达结束页/未开 autoplay/规则库缺失 skip", async () => {
+  const { evaluate } = await checksModule();
+  // 齐备基座：autoplay 真达结束页（CHK07 同 pass）+ 传 URL 协议 + 参数精确一致
+  const base = {
+    ...BASE, variance_threshold: 30, autoplay_timeout_sec: 45,
+    viewport_shots: { portrait: { has_canvas: true, variance: 90 },
+      landscape: { has_canvas: true, variance: 90 } },
+    exit_protocol: "window-open", exit_call: "window.open(url)",
+    exit_cta_hook: true, exit_cta_gestures: 1,
+    require_exit_url: "https://example.com/lp",
+    autoplay_enabled: true,
+    autoplay: { qcHooksPresent: true, pfEndFired: true, pfEndMs: 9000, pfEndWin: true,
+      reachedState: "end", endScreenVisible: true, gestures: 3 },
+    exit_calls: [{ fn: "window.open", url: "https://example.com/lp", at: 9100 }],
+  };
+  let out = evaluate({ ...base });
+  assert.ok(idsOf("pass", out).includes("CHK06"));
+  assert.deepEqual(idsOf("fail", out), [], "齐备基座零 fail");
+  const ok06 = out.find((c) => c.id === "CHK06");
+  assert.ok(ok06.detail.includes("window.open") && ok06.detail.includes("https://example.com/lp"),
+    ok06.detail);
+
+  // 无参协议（meta 型）：调用恰发生即 pass，URL 不参与判定
+  out = evaluate({ ...base, exit_protocol: "fb-playable", exit_call: "FbPlayableAd.onComplete()",
+    require_exit_url: null,
+    exit_calls: [{ fn: "FbPlayableAd.onComplete", url: null, at: 9100 }] });
+  assert.equal(out.find((c) => c.id === "CHK06").status, "pass");
+
+  // 传 URL 协议参数不符（实得 null/别址）→ 恰 fail
+  out = evaluate({ ...base, exit_calls: [{ fn: "window.open", url: null, at: 9100 }] });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"]);
+  out = evaluate({ ...base, require_exit_url: null,
+    exit_calls: [{ fn: "window.open", url: "javascript:void(0)", at: 9100 }] });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"], "无 require 时期望绝对 http(s)");
+  out = evaluate({ ...base, require_exit_url: "https://example.com/other",
+    exit_calls: [{ fn: "window.open", url: "https://example.com/lp", at: 9100 }] });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"], "精确匹配口径");
+
+  // 调用面不符（协议期望 mraid.open，实得别的函数）→ 恰 fail
+  out = evaluate({ ...base, exit_protocol: "mraid", exit_call: "mraid.open(url)",
+    exit_calls: [{ fn: "window.open", url: "https://example.com/lp", at: 9100 }] });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"]);
+
+  // CTA 调用发生但退出接口记账为空 → 恰 fail（文案含期望调用名）
+  out = evaluate({ ...base, exit_calls: [] });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"]);
+  const miss = out.find((c) => c.id === "CHK06");
+  assert.ok(miss.detail.includes("window.open 未被调用"), miss.detail);
+
+  // 钩子缺失：有 --require-exit-url 要求 → 从严 fail；无要求 → skip（显式未测）
+  out = evaluate({ ...base, exit_cta_hook: false });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"]);
+  out = evaluate({ ...base, exit_cta_hook: false, require_exit_url: null });
+  assert.equal(out.find((c) => c.id === "CHK06").status, "skip",
+    "无判定要求且无取证钩子 → skip（不假定）");
+  out = evaluate({ ...base, exit_cta_gestures: 0 });
+  assert.deepEqual(idsOf("fail", out), ["CHK06"]);
+
+  // 未达结束页 / 未开 autoplay / 规则库无退出配置 / 未登记协议 → skip
+  out = evaluate({ ...base, autoplay: { ...base.autoplay, reachedState: "playing",
+    pfEndFired: false } });
+  assert.equal(out.find((c) => c.id === "CHK06").status, "skip");
+  out = evaluate({ ...base, autoplay_enabled: false });
+  assert.equal(out.find((c) => c.id === "CHK06").status, "skip");
+  out = evaluate({ ...base, exit_protocol: null, exit_call: null });
+  assert.equal(out.find((c) => c.id === "CHK06").status, "skip");
+  out = evaluate({ ...base, exit_protocol: "mystery", exit_calls: [{ fn: "x", url: null }] });
+  assert.equal(out.find((c) => c.id === "CHK06").status, "skip",
+    "未登记协议形态 → skip（不假定）");
+});
+
+test("MUT 构造算法：锚点注入逐字节符合 §8 表；MUT-04 pad 精确到 maxBytes+4096；MUT-05 剥除外呼 / MUT-06 注入伴生引用", async () => {
+  const { MUTANTS, buildMutantSource, oversizeLimitBytes, readTextUniversal,
+    materializeMutants } = await import("./mutations.mjs");
   // Python read_text 的 universal-newline 语义：CRLF 夹具按 LF 参与锚点匹配。
   const base = readTextUniversal(FIXTURE_MINI);
   const marker = "  <script>\n    // QC 桥接桩";
@@ -240,6 +332,31 @@ test("MUT 构造算法：锚点注入逐字节符合 §8 表；MUT-04 pad 精确
   const mut04 = await buildMutantSource(MUTANTS[2], base, limit);
   assert.equal(mut04.html.length, limit + 4096, "MUT-04 总字节 = maxBytes+4096");
   assert.ok(mut04.html.toString("utf8").includes("--></body>"), "MUT-04 注释填充闭合");
+
+  // MUT-05：退出外呼行被剥除为空操作（CHK06 实装第二波；基座 mini-exit.html）
+  const miniExit = readTextUniversal(join(FACTORY_ROOT,
+    "qacore", "tests", "fixtures", "mini-exit.html"));
+  const mut05 = await buildMutantSource(MUTANTS[3], miniExit, limit);
+  const html05 = mut05.html.toString("utf8");
+  assert.ok(!html05.includes('window.__pfRouteExit("https://example.com/mini-exit-landing")'),
+    "MUT-05 应剥除外呼行");
+  assert.ok(html05.includes("void 0; /* MUT-05: 退出接口外呼已剥除 */"), "MUT-05 空操作替换");
+  assert.ok(html05.includes("__pfRouteExit = function"), "路由函数本体保留（只剥调用）");
+  assert.ok(miniExit.includes("__PF_QC__") && miniExit.includes("cta:"), "基座含 cta 取证钩子");
+
+  // MUT-06：本地伴生 <script src> 注入 + 伴生文件落盘（CHK02 计数口径）
+  const mut06 = await buildMutantSource(MUTANTS[4], base, limit);
+  assert.ok(mut06.html.toString("utf8").includes('<script src="mut06-extra.js"></script>'),
+    "MUT-06 注入本地伴生引用");
+  const materialized = await materializeMutants(join(dirname(FIXTURE_MINI), "_mut-eval"),
+    RULES_PATH, FIXTURE_MINI);
+  try {
+    assert.equal(materialized.length, 5, "恰五个已实装 mutant");
+    const extraPath = join(dirname(FIXTURE_MINI), "_mut-eval", "mut06-extra.js");
+    assert.ok(readFileSync(extraPath, "utf8").includes("MUT-06"), "伴生文件已落盘");
+  } finally {
+    rmSync(join(dirname(FIXTURE_MINI), "_mut-eval"), { recursive: true, force: true });
+  }
 
   // 夹具只读：构造过程不落盘到夹具
   assert.equal(readTextUniversal(FIXTURE_MINI), base, "夹具未被改动");

@@ -35,7 +35,7 @@ oracle `../repo/` 封存只读；差分对齐在**契约层**（spec 输入 → 
 
 ```bash
 npm ci            # 安装（离线机用预打包 node_modules）
-npm test          # node --test 全仓测试（含数据资产 sha 逐项校验；122 件）
+npm test          # node --test 全仓测试（含数据资产 sha 逐项校验；132 件）
 npm run build     # esbuild 构建链（遍历 workspaces 包；空跑 exit 0）
 npm run verify:assets   # 单独重算 REUSED-ASSETS.md 登记册
 
@@ -78,29 +78,35 @@ docs/diff/      差分报告（成品终审证据）
 - **六渠道打包**：AppLovin/Meta 单 HTML；Mintegral zip；Google/Unity zip；
   TikTok/Pangle zip（js-sdk 桩），各带 pack-manifest 旁车
 - **素材管线（assetkit）**：压图四编码竞标（永不增大）+ ffmpeg AAC + 字体子集 + 图集；
-  make 默认接线 `PF_ASSET_OPTMAP`（模板命中即内联优化产物，旁车记 `source=assetkit`）；
+  make 默认接线 `PF_ASSET_OPTMAP`（四模板命中即内联优化产物，旁车记 `source=assetkit`）；
   selftest 实测 21,497,003B→163,548B（降 99.24%）；demo 素材 893B→402B（降 54.98%，
   与 oracle 同值）
-- **网页操作台（webui）**：浏览器选模板/传 PNG/填文案（或传 spec JSON）→ make 任务 →
-  状态轮询 → 二维码 + 质检报告 + 渠道包下载；match3 seed 可解性预检与 pullpin 顺序复核
-  复用 `@pf/spec` 单源；端到端 selftest 30 断言
-- **自动质检（qacore）**：包体上限、外网请求拦截、首点前静音、横竖屏、文案与替换素材
-  上屏（CHK10）等；未实装项如实标 skip，不算通过
+- **网页操作台（webui）**：浏览器选模板（match3/merge/pullpin/sort）/传 PNG/填文案（或传
+  spec JSON）→ make 任务 → 状态轮询 → 二维码 + 质检报告 + 渠道包下载；match3 seed 可解性
+  预检与 pullpin 顺序复核复用 `@pf/spec` 单源；端到端 selftest 30 断言
+- **自动质检（qacore）**：包体大小、文件数、外网请求拦截、首点前静音、横竖屏、退出接口、
+  文案与替换素材上屏（CHK10）等——CHK01–CHK10 十项全部实装（2026-10-06 CHK02/CHK06
+  收口，见 docs/specs/qacore-amendments.md）；判定前提不具备时如实标 skip，不算通过
 
 ## 预留 / 未做（如实登记，禁止按已接通引用）
 
-- **模板 optmap 接线缺口**：merge/pullpin/sort 三模板未接 `PF_ASSET_OPTMAP`，直读原素材
-  内联——assetkit 的优化对这三模板不生效（仅 tmpl-match3 接线）。这是 oracle 原状
-  （oracle 仅 tmpl-match3/build.mjs:43-61 有接线），非 factory 移植引入的回归。
-- **webui sort 模板入口未开放**：模板本体在 make 层可用，但操作台表单未入表
-  （oracle specgen.py:32 TEMPLATES 仅 match3/merge/pullpin，oracle README 自认
-  "待 specgen 注册后开放"——factory 保持同口径）。
+- ~~模板 optmap 接线缺口~~（**2026-10-06 收口**）：merge/pullpin/sort 三模板已接
+  `PF_ASSET_OPTMAP`（与 tmpl-match3 同一管线：命中内联优化产物、旁车记
+  `source=assetkit`，未命中回退原素材；eval `test/template-optmap.test.mjs`
+  四模板命中/回退/无 optmap 三态全断言）。
+- ~~webui sort 模板入口未开放~~（**2026-10-06 收口**）：sort 已入 specgen 表
+  （label 排序分类、手势 tap、槽位 rod/piece、golden 同款冻结参数），
+  操作台表单经 /api/meta 动态出选项；组装 spec 过 schema+不变式双校验。
 - **pf 占位子命令 build/pack/rules-check**：exit 2 回显"尚未实现"（两侧行为对称的占位，
   占位语义本身是契约；全流水线统一走 make）。
 - **演示/golden spec 声明素材大半不存在**：golden-match3 等声明的 `assets/theme-a/*`
   （sprites×6/audio×2/bg/font）在两仓均无对应文件，仅 demo-zh 的 piece-0.png 真实存在；
   缺失素材走"回退程序化贴图"（构建脚本 design 如此，告警不失败）——已知边界，不是管线 bug。
-- **qacore 两项检查未实装**：CHK02 文件数、CHK06 退出接口，各渠道报告如实记 skip。
+- ~~qacore 两项检查未实装~~（**2026-10-06 收口**）：CHK02 文件数（入口 + 运行期真实
+  取走的本地伴生文件计数，容器桩/favicon 不计）与 CHK06 退出接口（按规则库注入渠道
+  退出桩 + 结束页 CTA 真实点击取证 + `--require-exit-url` 参数精确断言）已实装并对
+  golden 案例出真实判定；变异层新增 MUT-05（退出缺失→恰 CHK06）/MUT-06（伴生文件→恰
+  CHK02）防恒绿。实装与契约面修订详见 `docs/specs/qacore-amendments.md`。
 - **MODEL-ADAPTER（llmgw）**：网关壳在 `packages/llmgw/`，无生产调用方（oracle 同状：
   离线 mock 自测过、director 未开工）。
 - **AI 生成（director）、截图/录屏生成试玩、Cocos 工程接入**：未实现（oracle 同状）。

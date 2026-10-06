@@ -38,10 +38,10 @@ CLI：`node packages/assetkit/cli.mjs run <素材...> --out <dir> [--spec ...]` 
 ## 2. pf make 接线（默认启用）
 
 - make 在 validate 后对 spec 声明素材跑 assetkit，模板构建子进程经 `PF_ASSET_OPTMAP`
-  环境变量接线；`tmpl-match3/build.mjs` 对声明串精确命中即内联优化产物（旁车
-  `<out>.assets.json` 如实记 `source=assetkit`），未命中回退原素材、行为同旧版。
-  **merge/pullpin/sort 三模板未接 optmap**（直读原素材内联）——oracle 原状（仅
-  tmpl-match3 有接线），factory 如实登记于根 README 预留/未做。
+  环境变量接线；四模板（tmpl-match3/merge/pullpin/sort，2026-10-06 起三后到模板与
+  match3 同一管线）对声明串精确命中即内联优化产物（旁车 `<out>.assets.json` 如实记
+  `source=assetkit`），未命中回退原素材、行为同旧版（eval：`test/template-optmap.test.mjs`
+  四模板 × 命中/未命中/无 optmap 三态）。
 - spec 无声明素材时零开销空跑（进程内直跑无子进程）；素材管线失败按流水线失败 exit 1
   （宁可失败不带病出包）；素材汇总进 `pipeline-report.json` 的 `assetkit` 键
   （`{dir, optmap, report, totals}`，键集不变）。

@@ -8,6 +8,7 @@ import { validateSpec } from "../../packages/spec/src/validate.ts";
 import {
   DEFAULT_CHANNELS,
   SpecBuildError,
+  TEMPLATES,
   assembleSpec,
   defaultsTable,
   localeDefaults,
@@ -24,7 +25,7 @@ test("sanitizeProjectId：清洗为 ^[a-z0-9][a-z0-9-]{0,63}$，洗空回退 web
 });
 
 test("localeDefaults/defaultsTable：五键齐全 + 模板×语言全覆盖（I5 恒可满足）", () => {
-  for (const tpl of ["match3", "merge", "pullpin"]) {
+  for (const tpl of ["match3", "merge", "pullpin", "sort"]) {
     for (const loc of ["zh", "en", "ja", "ko", "pt-BR", "de", "ar"]) {
       const d = localeDefaults(tpl, loc);
       for (const k of ["cta", "tutorial", "win", "lose", "score"]) {
@@ -37,11 +38,13 @@ test("localeDefaults/defaultsTable：五键齐全 + 模板×语言全覆盖（I5
     }
   }
   const table = defaultsTable();
-  assert.deepEqual(Object.keys(table).sort(), ["match3", "merge", "pullpin"]);
+  assert.deepEqual(Object.keys(table).sort(), ["match3", "merge", "pullpin", "sort"]);
   assert.equal(table["match3"]["zh"].cta, "立即下载");
   assert.equal(table["pullpin"]["en"].tutorial, "Tap to pull the pin and rescue!");
-  // merge/pullpin 无全语言教程 → 回退 en
+  assert.equal(table["sort"]["zh"].tutorial, "点选一根柱子，再点目标柱倒过去！");
+  // merge/pullpin/sort 无全语言教程 → 回退 en
   assert.equal(table["merge"]["ja"].tutorial, "Drag to merge and upgrade!");
+  assert.equal(table["sort"]["ja"].tutorial, "Tap a stack, then tap where it pours!");
 });
 
 test("assembleSpec（match3）：组装即过 schema+不变式双校验；表单覆盖文案生效", () => {
@@ -111,6 +114,24 @@ test("assembleSpec（merge）：槽位缺省指向主题路径（缺失→程序
   assert.equal(spec.assets.sprites["tier-1"], "assets/theme-a/tier-1.png");
   assert.equal(spec.assets.background, "assets/theme-a/bg-portrait.png");
   assert.deepEqual(Object.keys(spec.assets.audio), ["tap", "win"]);
+});
+
+test("assembleSpec（sort）：golden 同款冻结参数 + 组装即过双校验 + 槽位/手势入表", () => {
+  const spec = assembleSpec("sort", { projectId: "Sort Demo 1", locale: "zh", seed: 20260930 });
+  assert.equal(spec.game.template, "sort");
+  assert.equal(spec.meta.projectId, "sort-demo-1");
+  assert.equal(spec.meta.seed, 20260930);
+  // 参数 = golden-sort.json 同款冻结默认
+  assert.deepEqual(spec.game.params,
+    { rods: 5, layersPerRod: 4, colors: 4, screwMode: false, moveLimit: 30 });
+  // 手势与槽位（golden-sort：tap；rod/piece 两键缺省指向主题路径）
+  assert.equal(spec.flow.tutorial.gesture, "tap");
+  assert.deepEqual(spec.assets.sprites,
+    { rod: "assets/theme-a/rod.png", piece: "assets/theme-a/piece.png" });
+  const issues = validateSpec(spec).errors;
+  assert.deepEqual(issues, [], `sort 组装 spec 必须零 issue：${JSON.stringify(issues)}`);
+  // /api/meta 表单口径：sort 在 TEMPLATES 入表（webui 表单入口）
+  assert.ok(TEMPLATES.includes("sort"), "sort 应已入 TEMPLATES 表");
 });
 
 test("assembleSpec 负向：未知模板/未知语言/未知文案键/超长标题/坏 landingUrl → SpecBuildError", () => {

@@ -9,6 +9,7 @@
 import type { Page } from "playwright";
 
 import { ev } from "./ev.ts";
+import { readExitCalls, type ExitCall } from "./exit.ts";
 import { PROBE_JS } from "./probe.ts";
 
 // 拖拽位移（像素）：小于最小棋盘格边长，方向语义由 hint.type 给出。
@@ -38,7 +39,7 @@ export interface QcHint { x: number; y: number; type: string }
 async function hint(page: Page): Promise<QcHint | null> {
   let raw: unknown;
   try {
-    raw = await ev(page, 
+    raw = await ev(page,
       "() => { const q = window.__PF_QC__;"
       + " if (!q || typeof q.hint !== 'function') return null;"
       + " try { return q.hint(); } catch (e) { return null; } }",
@@ -51,6 +52,35 @@ async function hint(page: Page): Promise<QcHint | null> {
   const x = h.x, y = h.y;
   if (typeof x !== "number" || typeof y !== "number") return null;
   return { x, y, type: typeof h.type === "string" ? h.type : "tap" };
+}
+
+/** 结束页 CTA 热区中心（__PF_QC__.cta()，CHK06 取证驱动）；无钩子/无坐标 → null。 */
+export async function ctaHint(page: Page): Promise<QcHint | null> {
+  let raw: unknown;
+  try {
+    raw = await ev(page,
+      "() => { const q = window.__PF_QC__;"
+      + " if (!q || typeof q.cta !== 'function') return null;"
+      + " try { return q.cta(); } catch (e) { return null; } }",
+    );
+  } catch {
+    return null;
+  }
+  if (raw === null || typeof raw !== "object") return null;
+  const h = raw as Record<string, unknown>;
+  const x = h.x, y = h.y;
+  if (typeof x !== "number" || typeof y !== "number") return null;
+  return { x, y, type: typeof h.type === "string" ? h.type : "tap" };
+}
+
+/** __PF_QC__.cta 钩子是否在位（判定"模板未提供"与"提供了但无坐标"的从严分界）。 */
+export async function hasCtaHook(page: Page): Promise<boolean> {
+  try {
+    return Boolean(await ev(page,
+      "() => !!(window.__PF_QC__ && typeof window.__PF_QC__.cta === 'function')"));
+  } catch {
+    return false;
+  }
 }
 
 export async function pfMuted(page: Page): Promise<boolean | null> {
@@ -256,6 +286,10 @@ export interface AutoplayFacts {
   textStatesHook: boolean;
   qcTexts: string[];
   qcVisibleTexts: string[];
+  /** CHK06 取证（竖屏趟到达结束页后）：cta 钩子在位 / 真实点击次数 / 退出接口记账。 */
+  exitCtaHook: boolean;
+  exitCtaGestures: number;
+  exitCalls: ExitCall[];
   page_texts?: string[];
   text_states?: TextStateEntry[];
   text_states_hook?: boolean;
@@ -304,6 +338,9 @@ export async function driveAutoplay(page: Page, timeoutSec: number): Promise<Aut
     textStatesHook: false,
     qcTexts: [],
     qcVisibleTexts: [],
+    exitCtaHook: false,
+    exitCtaGestures: 0,
+    exitCalls: [],
   };
   const seenTexts = new Set<string>();
   const visibleTexts = new Set<string>();
@@ -381,6 +418,19 @@ export async function driveAutoplay(page: Page, timeoutSec: number): Promise<Aut
       facts.mediaPlaysBeforeInteraction ?? 0, Math.trunc(ms.playsBeforeFirst));
   }
   if (facts.reachedState !== "end") facts.reachedState = await state(page);
+  // CHK06 取证驱动（到达结束页才做）：点击模板 __PF_QC__.cta() 上报的 CTA 热区
+  // 中心（真实 pointer 事件，与 hint 手势同一语义）→ 模板 PF.open(landingUrl) →
+  // 桥 routeExit → 渠道退出桩记账。点击次数与记账如实采集，判定在 checks。
+  facts.exitCtaHook = await hasCtaHook(page);
+  if (facts.reachedState === "end") {
+    const c = await ctaHint(page);
+    if (c !== null) {
+      await gesture(page, c);
+      facts.exitCtaGestures += 1;
+      await page.waitForTimeout(250); // pointerup→PF.open→routeExit 记账的余量
+    }
+    facts.exitCalls = await readExitCalls(page);
+  }
   // 结束页补采一轮文案实况。
   const [hookFinal, statesFinal] = await qcTextStates(page);
   if (hookFinal) facts.textStatesHook = true;

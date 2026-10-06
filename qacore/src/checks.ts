@@ -1,14 +1,18 @@
 /**
- * 检查项定义（M8 规划十项；当前实装 CHK01/03/04/05/07/08/09/10；
- * oracle checks.py 判定语义逐项移植）。
+ * 检查项定义（M8 规划十项，当前全部实装：CHK01–CHK10；
+ * oracle checks.py 判定语义逐项移植，CHK02/CHK06 为 factory 侧 2026-10-06 实装——
+ * oracle 原状 skip，见 docs/specs/qacore-amendments.md chk02-chk06 条目）。
  *
  * 判定状态取值：pass / fail / skip。
  * - pass/fail：由本次无头打开过程真实测得；
- * - skip：检查项尚未实装（CHK02/06）或产物/配置不具备判定前提，不做任何假定结论。
+ * - skip：产物/配置不具备判定前提（如规则库无该渠道上限、未开自动试玩、
+ *   结束页未达），不做任何假定结论。
  *   注意：渠道要求静音时（muteBeforeFirstInteraction 默认 true），CHK04 缺 PF 桥/
  *   探针不是 skip 而是 fail——无法证明静音合规即违规。
  * - skip 是显式声明"未测"，报告中保留 skip 字样，严禁标成 pass。
  */
+
+import { EXIT_FN_BY_PROTOCOL } from "./exit.ts";
 
 export interface Check {
   id: string;
@@ -68,7 +72,27 @@ export function evaluate(facts: Facts): Check[] {
       `${num(facts.artifact_bytes)} B > 上限 ${num(limit)} B`));
   }
 
-  checks.push(skip("CHK02", "文件数 ≤ 渠道上限", "未实装（当前输入为单 HTML 文件，无目录清点）"));
+  // CHK02 文件数 ≤ 渠道上限（2026-10-06 实装）：被测交付物 = 入口 HTML + 运行期
+  // 真实取走的本地伴生文件（run.ts 记账：200 响应、非容器桩、去重路径）；规则库
+  // 无该渠道上限 → skip（不假定，与 CHK01 同判）。
+  const maxFiles = facts.channel_max_files;
+  if (maxFiles === null || maxFiles === undefined) {
+    checks.push(skip("CHK02", "文件数 ≤ 渠道上限",
+      `规则库无渠道 ${JSON.stringify(facts.channel)} 的文件数上限，不判定`));
+  } else {
+    const extras: string[] = facts.file_count_extras ?? [];
+    if (num(facts.file_count) <= num(maxFiles)) {
+      checks.push(check("CHK02", "文件数 ≤ 渠道上限", "pass",
+        `${num(facts.file_count)} 个文件 ≤ 上限 ${num(maxFiles)}`
+        + `（入口 HTML + ${extras.length} 个本地伴生文件，容器桩不计）`));
+    } else {
+      const shown = extras.slice(0, 5).join("、");
+      const more = extras.length > 5 ? `（另 ${extras.length - 5} 个略）` : "";
+      checks.push(check("CHK02", "文件数 ≤ 渠道上限", "fail",
+        `${num(facts.file_count)} 个文件 > 上限 ${num(maxFiles)}`
+        + `：本地伴生 ${extras.length} 个——${shown}${more}`));
+    }
+  }
 
   // CHK03 零外网连接（横竖屏两趟合并判定）：HTTP 请求由 route 拦截记账；
   // WebSocket 由 route_web_socket 记账（条目前缀 websocket:）；
@@ -182,7 +206,80 @@ export function evaluate(facts: Facts): Check[] {
     }
   }
 
-  checks.push(skip("CHK06", "渠道退出接口调用", "未实装（渠道 stub 注入属 M8 后续里程碑）"));
+  // CHK06 渠道退出接口调用（2026-10-06 实装）：QC 按规则库 exit.protocol 注入渠道
+  // 退出桩（容器替身），自动试玩到达结束页后点击模板 __PF_QC__.cta() 上报的 CTA
+  // 热区（真实 pointer 事件），断言渠道退出接口被调用。分型断言（channel-adapters
+  // §3 修正候选）：传 URL 协议（mraid/window-open）断言参数=--require-exit-url
+  // （未传时从严要求绝对 http(s) 地址）；不传 URL 协议断言调用恰发生。
+  // 未开自动试玩/结束页未达 → skip（触发时机不存在，未达项归 CHK07 判定，不双罚）。
+  const exitProtocol: string | null = typeof facts.exit_protocol === "string"
+    ? facts.exit_protocol
+    : null;
+  if (exitProtocol === null) {
+    checks.push(skip("CHK06", "渠道退出接口调用",
+      `规则库无渠道 ${JSON.stringify(facts.channel)} 的退出接口配置，不判定`));
+  } else if (!facts.autoplay_enabled) {
+    checks.push(skip("CHK06", "渠道退出接口调用",
+      "未开 --autoplay，不驱动结束页 CTA，退出接口无触发时机"));
+  } else if (auto.reachedState !== "end" || auto.pfEndFired !== true) {
+    checks.push(skip("CHK06", "渠道退出接口调用",
+      `自动试玩未达结束页（state=${JSON.stringify(auto.reachedState)}，`
+      + "pf:end 是否触发见 CHK07），退出接口无触发时机"));
+  } else if (facts.exit_cta_hook !== true) {
+    // 取证钩子缺失：有明确判定要求（--require-exit-url，make/matrix 对带落地页的
+    // 产物恒传）→ 从严 fail（无法验证退出接口即违规，CHK10 自证从严同判）；无
+    // 要求（对既有夹具/历史产物的手工复验）→ skip（显式未测，严禁标 pass）。
+    if (typeof facts.require_exit_url === "string" && facts.require_exit_url.length > 0) {
+      checks.push(check("CHK06", "渠道退出接口调用", "fail",
+        "已要求退出接口取证（--require-exit-url），但模板未提供 __PF_QC__.cta()，"
+        + "结束页 CTA 热区不可得，无法验证"));
+    } else {
+      checks.push(skip("CHK06", "渠道退出接口调用",
+        "模板未提供 __PF_QC__.cta() 取证钩子，结束页 CTA 热区不可得，未测（显式 skip）"));
+    }
+  } else if (num(facts.exit_cta_gestures) < 1) {
+    checks.push(check("CHK06", "渠道退出接口调用", "fail",
+      "cta 钩子在位但未取得 CTA 坐标（cta()=null），退出接口未被触发"));
+  } else {
+    const calls: Array<Record<string, unknown>> = (facts.exit_calls ?? []) as
+      Array<Record<string, unknown>>;
+    const expectedFn = EXIT_FN_BY_PROTOCOL[exitProtocol];
+    if (expectedFn === undefined) {
+      checks.push(skip("CHK06", "渠道退出接口调用",
+        `退出协议 ${JSON.stringify(exitProtocol)} 未登记取证面，不判定`));
+    } else {
+      const hits = calls.filter((c) => c.fn === expectedFn);
+      if (hits.length < 1) {
+        const others = calls.map((c) => String(c.fn)).filter((f) => f.length > 0);
+        checks.push(check("CHK06", "渠道退出接口调用", "fail",
+          `结束页 CTA 已点击（${num(facts.exit_cta_gestures)} 次），但渠道退出接口 `
+          + `${expectedFn} 未被调用（规则库 exit.call=${JSON.stringify(facts.exit_call)}；`
+          + `记账：${others.length > 0 ? others.join("、") : "无任何退出调用"}）`));
+      } else {
+        // 传 URL 协议：断言参数（有 require-exit-url 精确匹配；未传时绝对 http(s)）。
+        const wantUrl = typeof facts.require_exit_url === "string"
+          && facts.require_exit_url.length > 0
+          ? facts.require_exit_url
+          : null;
+        const takesUrl = exitProtocol === "mraid" || exitProtocol === "window-open";
+        const urlOk = (u: unknown): boolean =>
+          typeof u === "string" && (wantUrl !== null ? u === wantUrl
+            : /^https?:\/\/\S+$/.test(u));
+        if (takesUrl && !hits.some((c) => urlOk(c.url))) {
+          const got = hits.map((c) => fmtPy(c.url)).join("、");
+          checks.push(check("CHK06", "渠道退出接口调用", "fail",
+            `${expectedFn} 已调用但参数不符（期望 ${wantUrl !== null
+              ? JSON.stringify(wantUrl) : "绝对 http(s) 地址"}，实得 ${got}）`));
+        } else {
+          const firstUrl = hits[0]!.url;
+          checks.push(check("CHK06", "渠道退出接口调用", "pass",
+            `结束页 CTA 点击触发 ${expectedFn}（调用 ${hits.length} 次`
+            + (takesUrl ? `，参数=${fmtPy(firstUrl)}）` : "，无参协议）")
+            + `，协议 ${exitProtocol} 与规则库 exit.call 一致`));
+        }
+      }
+    }
+  }
 
   // CHK07 自动试玩到结束页（pf:end 真实触发 + 结束页可见）
   if (!facts.autoplay_enabled) {

@@ -8,6 +8,11 @@
  * | MUT-02 未静音   | 同锚点注入未静音 `<audio autoplay src="data:audio/wav;base64,...">` | CHK04 |
  * | MUT-04 超体积   | `</body>` → `<!--` + "x"×pad + `--></body>`，
  * |                 | pad 使总字节 = 渠道 maxBytes+4096（meta 3MB 压线） | CHK01 |
+ * | MUT-05 退出缺失 | 基座 = mini-exit.html（仓自有取证夹具，mini.html 受 REUSED-ASSETS
+ * |                 | 字节登记不可改）：把结束页 CTA 的退出外呼行（`__pfRouteExit("…")`）
+ * |                 | 替换为空操作——CHK06 实装第二波（spec §8"退出接口缺失→CHK06 实装后"） | CHK06 |
+ * | MUT-06 伴生文件 | 基座 = mini.html：QC 桥接桩锚点前注入本地 `<script src="mut06-extra.js">`
+ * |                 | 并在产物旁写出该文件（200 应答、非桩）——单文件交付被打破 | CHK02 |
  *
  * 通用纪律：样本写 tmp/（先清旧产物再跑，报告存在=本次真事实）；
  * 夹具本身只读、永不被改；恰命中断言 = exit 1 且 fail 集合恰为 {期望 CHK}。
@@ -21,6 +26,8 @@ import { fileURLToPath } from "node:url";
 
 const PKG_DIR = fileURLToPath(new URL("..", import.meta.url));
 export const FIXTURE_MINI = join(PKG_DIR, "tests", "fixtures", "mini.html");
+/** MUT-05 基座：仓自有取证夹具（mini.html 的 CHK06 扩展版，factory 自有不入登记册）。 */
+export const FIXTURE_MINI_EXIT = join(PKG_DIR, "tests", "fixtures", "mini-exit.html");
 
 const MUT_AUDIO_DATA_URI = "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEA"
   + "RKwAAIhYAQACABAAZGF0YQAAAAA=";
@@ -28,6 +35,11 @@ export const MUTATION_OVERSIZE_CHANNEL = "meta"; // 规则库中该渠道上限 
 const MUT_EXTERNAL_IMG = '<img src="https://cdn.example.com/mut01-external.png"'
   + ' alt="" width="1" height="1">';
 const MUT_UNMUTED_AUDIO = `<audio autoplay src="${MUT_AUDIO_DATA_URI}"></audio>`;
+/** MUT-05 锚点：夹具结束页 CTA 的退出外呼行（fixtures/mini-exit.html 原文）。 */
+const MUT_EXIT_ANCHOR = 'window.__pfRouteExit("https://example.com/mini-exit-landing");';
+/** MUT-06 注入的本地伴生脚本引用与文件内容（本地 200 应答、非桩）。 */
+const MUT_EXTRA_REF = '<script src="mut06-extra.js"></script>';
+const MUT_EXTRA_JS = "/* pf-qacore MUT-06：本地伴生文件（非容器桩，CHK02 计数口径） */\n";
 
 export const MUTANTS = [
   {
@@ -45,7 +57,23 @@ export const MUTANTS = [
     channel: MUTATION_OVERSIZE_CHANNEL, expect: "CHK01",
     desc: `包体压过 ${MUTATION_OVERSIZE_CHANNEL} 渠道 maxBytes 的注释填充`,
   },
+  {
+    name: "MUT-05-exit-missing", replaceExit: true, fixture: "mini-exit",
+    channel: "preview", expect: "CHK06",
+    desc: "结束页 CTA 的渠道退出外呼被剥除（退出桩记账为空；基座 mini-exit）",
+  },
+  {
+    name: "MUT-06-extra-local-file", inject: MUT_EXTRA_REF,
+    extraFiles: { "mut06-extra.js": MUT_EXTRA_JS },
+    channel: "preview", expect: "CHK02",
+    desc: "本地伴生 <script src>（file_count 2 > 上限 1，CHK03/08 不受扰）",
+  },
 ];
+
+/** 变异基座名 → 夹具绝对路径（默认 oracle 字节复用 mini.html）。 */
+function fixtureFor(mutant) {
+  return mutant.fixture === "mini-exit" ? FIXTURE_MINI_EXIT : FIXTURE_MINI;
+}
 
 /** 规则库 meta 渠道上限；规则库不可读时内部从严线 3MB（与 oracle 门禁同值）。 */
 export function oversizeLimitBytes(rulesPath) {
@@ -87,6 +115,16 @@ export async function buildMutantSource(mutant, base, limitBytes) {
       html: Buffer.concat([baseBytes.subarray(0, idx), filler, baseBytes.subarray(idx + 7)]),
     };
   }
+  // MUT-05：剥除结束页 CTA 的退出外呼行（替换为空操作；外呼记账必空 → CHK06 fail）。
+  if (mutant.replaceExit === true) {
+    if (!base.includes(MUT_EXIT_ANCHOR)) {
+      throw new Error("夹具缺少退出外呼行，MUT-05 变异位置失效");
+    }
+    return {
+      name: mutant.name, expect: mutant.expect, channel: mutant.channel,
+      html: Buffer.from(base.replace(MUT_EXIT_ANCHOR, "void 0; /* MUT-05: 退出接口外呼已剥除 */"), "utf8"),
+    };
+  }
   const marker = "  <script>\n    // QC 桥接桩";
   if (!base.includes(marker)) {
     throw new Error("夹具缺少 QC 桥接桩锚点，变异注入位置失效");
@@ -104,13 +142,19 @@ export async function buildMutantSource(mutant, base, limitBytes) {
 export async function materializeMutants(outDir, rulesPath, fixturePath = FIXTURE_MINI) {
   await rm(outDir, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
-  const base = readTextUniversal(fixturePath);
   const limitBytes = oversizeLimitBytes(rulesPath);
+  const bases = new Map(); // 夹具路径 → universal-newline 归一文本（同基座只读一次）
   const out = [];
   for (const mutant of MUTANTS) {
-    const built = await buildMutantSource(mutant, base, limitBytes);
+    const basePath = fixtureFor(mutant);
+    if (!bases.has(basePath)) bases.set(basePath, readTextUniversal(basePath));
+    const built = await buildMutantSource(mutant, bases.get(basePath), limitBytes);
     const p = join(outDir, `${built.name}.html`);
     await writeFile(p, built.html);
+    // 伴生文件随产物落盘（MUT-06：本地真实文件，伺服 200 应答、非容器桩）。
+    for (const [name, content] of Object.entries(mutant.extraFiles ?? {})) {
+      await writeFile(join(outDir, name), content);
+    }
     out.push({ name: built.name, expect: built.expect, channel: built.channel, path: p });
   }
   return out;
